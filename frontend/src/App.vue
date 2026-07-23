@@ -1,22 +1,63 @@
-<script setup>
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
+import { atlas } from '@/lib/atlas'
+import { refreshSummary } from '@/composables/useSummary'
+
+type Theme = 'system' | 'light' | 'dark'
+const theme = ref<Theme>('system')
+
+function applyTheme(next: Theme): void {
+  theme.value = next
+  const root = document.documentElement
+  if (next === 'system') root.removeAttribute('data-theme')
+  else root.setAttribute('data-theme', next)
+  try {
+    localStorage.setItem('atlas.theme', next)
+  } catch {
+    // Storage unavailable; the toggle still works for this session.
+  }
+}
+
+function cycleTheme(): void {
+  applyTheme(theme.value === 'system' ? 'light' : theme.value === 'light' ? 'dark' : 'system')
+}
+
+onMounted(() => {
+  try {
+    const stored = localStorage.getItem('atlas.theme')
+    if (stored === 'light' || stored === 'dark') applyTheme(stored)
+  } catch {
+    // ignore
+  }
+  // Aggregates are optional to the page, so this is fire-and-forget: a sleeping
+  // API just leaves the counters showing their empty state.
+  void refreshSummary()
+})
 </script>
 
 <template>
-  <a class="skip-link" href="#main">Skip to main content</a>
-  <header class="site-header">
-    <div class="container header-inner">
-      <RouterLink to="/" class="brand" aria-label="Home">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span class="brand-text">
-          <strong>AI Safety Research Familiarity</strong>
-          <span class="brand-sub muted small">A community mapping of expertise</span>
-        </span>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site">
+    <div class="wrap site__inner">
+      <RouterLink class="site__brand" to="/">
+        <span class="site__name">Agendas × Problems</span>
+        <span class="site__iter">{{ atlas.meta.iteration_label }}</span>
       </RouterLink>
-      <nav class="site-nav" aria-label="Primary">
-        <RouterLink to="/">Framework</RouterLink>
-        <RouterLink to="/swiss-cheese">Defense model</RouterLink>
-        <RouterLink to="/about">About</RouterLink>
+
+      <nav class="site__nav" aria-label="Main">
+        <RouterLink to="/">Map</RouterLink>
+        <RouterLink to="/methodology">Methodology</RouterLink>
+        <RouterLink to="/privacy">Privacy</RouterLink>
+        <button
+          type="button"
+          class="site__theme"
+          :aria-label="`Colour theme: ${theme}. Click to change.`"
+          @click="cycleTheme"
+        >
+          {{ theme === 'system' ? '◐' : theme === 'light' ? '☀' : '☾' }}
+        </button>
       </nav>
     </div>
   </header>
@@ -25,98 +66,122 @@ import { RouterLink, RouterView } from 'vue-router'
     <RouterView />
   </main>
 
-  <footer class="site-footer">
-    <div class="container footer-inner">
-      <p class="small muted">
-        This platform records self-reported familiarity across AI safety research
-        areas and visualizes it in aggregate. It is a research instrument, not an
-        assessment of any individual. Submissions are aggregated; individual
-        responses and contact details are never published.
+  <footer class="foot">
+    <div class="wrap foot__inner">
+      <p class="foot__claim">
+        <strong>Manually curated.</strong> Every rating and every note on this site was written by
+        hand from published work. Nothing here is model-generated, and the site calls no model at
+        runtime. Sources last checked {{ atlas.meta.source_check_date }}.
       </p>
-      <p class="small muted">
-        <RouterLink to="/about">About &amp; methodology</RouterLink>
+      <p class="foot__links">
+        <RouterLink to="/methodology">Methodology</RouterLink>
+        <a href="/data/atlas.json" download>Source data (JSON)</a>
+        <RouterLink to="/privacy">Privacy</RouterLink>
+      </p>
+      <p class="foot__note">
+        {{ atlas.meta.iteration_label }}, a draft put out for correction, not a finished result.
+        Ratings are judgments about evidence maturity, not about how important a research area is.
       </p>
     </div>
   </footer>
 </template>
 
 <style scoped>
-.site-header {
+.site {
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
   position: sticky;
   top: 0;
-  z-index: 20;
-  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
-  backdrop-filter: saturate(1.1) blur(6px);
-  border-bottom: 1px solid var(--border);
+  z-index: 10;
 }
-.header-inner {
+
+.site__inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 64px;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-decoration: none;
-  color: var(--text-primary);
-}
-.brand-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  background: linear-gradient(150deg, #184f95, #3987e5);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
-  flex: none;
-}
-.brand-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
-}
-.brand-sub {
-  font-weight: 400;
-}
-.site-nav {
-  display: flex;
-  gap: 4px;
+  gap: 1rem;
+  padding-block: 0.7rem;
   flex-wrap: wrap;
 }
-.site-nav a {
-  padding: 7px 12px;
-  border-radius: 6px;
-  text-decoration: none;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-.site-nav a:hover {
-  background: var(--surface-2);
-  color: var(--text-primary);
-}
-.site-nav a.router-link-exact-active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-main {
-  min-height: 60vh;
-}
-.site-footer {
-  margin-top: 56px;
-  border-top: 1px solid var(--border);
-  background: var(--surface-1);
-}
-.footer-inner {
-  padding-block: 24px;
+
+.site__brand {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 760px;
+  align-items: baseline;
+  gap: 0.6rem;
+  color: inherit;
+  text-decoration: none;
 }
-@media (max-width: 560px) {
-  .brand-sub {
-    display: none;
-  }
+
+.site__name {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.site__iter {
+  font-size: 0.6875rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.site__nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.875rem;
+}
+
+.site__nav a {
+  color: var(--ink-secondary);
+  text-decoration: none;
+}
+
+.site__nav a:hover,
+.site__nav a.router-link-active {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.site__theme {
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  border-radius: var(--radius);
+  width: 2rem;
+  height: 1.85rem;
+  cursor: pointer;
+  line-height: 1;
+  color: var(--ink-secondary);
+}
+
+.foot {
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  margin-top: 2rem;
+}
+
+.foot__inner {
+  padding-block: 2rem 2.75rem;
+}
+
+.foot__claim {
+  font-size: 0.875rem;
+  color: var(--ink-secondary);
+  max-width: var(--measure);
+}
+
+.foot__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  font-size: 0.875rem;
+  margin: 1rem 0;
+}
+
+.foot__note {
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+  max-width: var(--measure);
+  margin: 0;
 }
 </style>

@@ -1,3 +1,0 @@
-DROP TABLE IF EXISTS ratings;
-DROP TABLE IF EXISTS submissions;
-DROP TABLE IF EXISTS research_areas;

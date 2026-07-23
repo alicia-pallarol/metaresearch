@@ -1,11 +1,10 @@
-# Cloudflare Pages security headers.
-# The connect-src is intentionally permissive to HTTPS so the frontend can reach
-# the Render API (and later a custom domain) without editing this file. Tighten it
-# to your exact API origin if you prefer.
+# Security headers for Cloudflare Pages.
+#
+# The site loads no third-party code by default. connect-src has to allow the API
+# origin, so set it to your Render URL before going live (see MANUAL_SETUP.md).
 /*
   X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
-  Referrer-Policy: no-referrer
   Permissions-Policy: geolocation=(), microphone=(), camera=(), interest-cohort=()
-  Cross-Origin-Opener-Policy: same-origin
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.onrender.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'

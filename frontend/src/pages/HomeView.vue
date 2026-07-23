@@ -1,206 +1,281 @@
-<script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useAggregates } from '../composables/useAggregates.js'
-import FamiliarityLegend from '../components/FamiliarityLegend.vue'
-import FrameworkTable from '../components/FrameworkTable.vue'
-import HeatmapGrid from '../components/HeatmapGrid.vue'
-import LoadingState from '../components/LoadingState.vue'
-import SubmissionForm from '../components/SubmissionForm.vue'
+<script setup lang="ts">
+import { computed, nextTick, ref } from 'vue'
+import { RouterLink } from 'vue-router'
+import { atlas, getAreaByName, getAreaByTag, tierCounts, tierRank } from '@/lib/atlas'
+import { gridCell, type GridSource, type Scenario } from '@/lib/community'
+import { useSummary } from '@/composables/useSummary'
+import AreaHeatmap from '@/components/AreaHeatmap.vue'
+import AgendaHeatmap from '@/components/AgendaHeatmap.vue'
+import DrillDownPanel from '@/components/DrillDownPanel.vue'
+import FocusAreas from '@/components/FocusAreas.vue'
+import TierLegend from '@/components/TierLegend.vue'
+import SwissCheesePanel from '@/components/SwissCheesePanel.vue'
 
-const { state, load, reload } = useAggregates()
+const { summary, totalSubmissions, uniqueSubmitters, state } = useSummary()
 
-const view = ref('table') // 'table' | 'heatmap'
-const showForm = ref(false)
-const flash = ref('')
+// Derived, never hard-coded: a new iteration changes these without a code edit.
+const counts = tierCounts()
+const ratedCells = computed(() => Object.values(counts).reduce((sum, n) => sum + n, 0))
+const robustCells = computed(() => counts['Robust (small scale)'] ?? 0)
 
-const areas = computed(() => state.data?.areas || [])
-const total = computed(() => state.data?.total_submissions || 0)
-const lowSample = computed(() => state.data?.low_sample_threshold ?? 3)
-const hasAnyRatings = computed(() => areas.value.some((a) => a.n > 0))
+// How the grid is being read. Owned here because the drill-down below it has to
+// answer for the same view the cell was clicked in.
+const source = ref<GridSource>('research')
+const scenario = ref<Scenario>('best')
 
-onMounted(load)
+const selected = ref<{ problemId: string; areaName: string } | null>(null)
+const gridSection = ref<HTMLElement | null>(null)
+const detailSlot = ref<HTMLElement | null>(null)
 
-function onSubmitted({ replaced }) {
-  showForm.value = false
-  flash.value = replaced
-    ? 'Your previous response was updated. Thank you.'
-    : 'Your response was recorded. Thank you.'
-  reload()
-  setTimeout(() => (flash.value = ''), 6000)
+/**
+ * The detail always opens in the same place, directly under the grid, and the
+ * page comes to it, clicking a cell should never leave the reader hunting for
+ * what changed further down.
+ */
+async function onSelect(cell: { problemId: string; areaName: string }): Promise<void> {
+  const isSame = selected.value?.problemId === cell.problemId && selected.value.areaName === cell.areaName
+  selected.value = isSame ? null : cell
+  if (isSame) return
+
+  await nextTick()
+  detailSlot.value?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+}
+
+/** "Show P1 in the grid": jump to the strongest area against that problem. */
+async function focusProblem(problemId: string): Promise<void> {
+  let best: { areaName: string; rank: number } | null = null
+  for (const areaName of atlas.area_matrix.area_order) {
+    const tag = getAreaByName(areaName)?.tag ?? ''
+    const { tier } = gridCell(source.value, scenario.value, tag, areaName, problemId, summary.value)
+    if (tier === null) continue
+    const rank = tierRank(tier)
+    if (!best || rank < best.rank) best = { areaName, rank }
+  }
+  if (best) selected.value = { problemId, areaName: best.areaName }
+
+  await nextTick()
+  gridSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+}
+
+/** "Show Interpretability in the grid": jump to its strongest cell against any problem. */
+async function focusArea(areaTag: string): Promise<void> {
+  const areaName = getAreaByTag(areaTag)?.name
+  if (areaName) {
+    let best: { problemId: string; rank: number } | null = null
+    for (const problem of atlas.problems) {
+      const { tier } = gridCell(source.value, scenario.value, areaTag, areaName, problem.id, summary.value)
+      if (tier === null) continue
+      const rank = tierRank(tier)
+      if (!best || rank < best.rank) best = { problemId: problem.id, rank }
+    }
+    if (best) selected.value = { problemId: best.problemId, areaName }
+  }
+
+  await nextTick()
+  gridSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
 }
 </script>
 
 <template>
-  <div class="container page">
-    <section class="intro">
-      <h1>A community map of AI safety research familiarity</h1>
-      <p class="lede">
-        Researchers self-report their familiarity with each area of a framework of
-        AI safety research. Responses are aggregated into the heatmap below to show
-        where collective expertise is concentrated — and where it is thin.
-      </p>
-      <div class="intro-actions">
-        <button class="btn btn-primary" @click="showForm = true">Submit your familiarity</button>
-        <RouterLink class="btn" to="/swiss-cheese">View the defense model</RouterLink>
-      </div>
-    </section>
+  <div>
+    <section class="hero">
+      <div class="wrap">
+        <p class="hero__badge">{{ atlas.meta.iteration_label }}</p>
+        <h1 class="hero__title">{{ atlas.meta.title }}</h1>
+        <p class="hero__lead">
+          {{ atlas.agendas.length }} research agendas across {{ atlas.areas.length }} areas, rated
+          against {{ atlas.problems.length }} open problems in AI safety. Every rating answers one
+          question: <em>how mature is the evidence that this line of work addresses this specific
+          problem?</em> The ratings are read and written by hand, one source at a time; no model
+          generated any of this.
+        </p>
+        <p class="hero__invite">
+          It is a draft put out for correction. Open any cell, then any agenda, to see the reasoning;
+          and if a rating looks wrong or you know a source we missed, tell us right there.
+        </p>
 
-    <div v-if="flash" class="notice flash" role="status">{{ flash }}</div>
+        <dl class="hero__stats">
+          <div class="stat">
+            <dt>Rated cells</dt>
+            <dd class="tabular">{{ ratedCells }}</dd>
+          </div>
+          <div class="stat">
+            <dt>Cells rated Robust</dt>
+            <dd class="tabular">{{ robustCells }}</dd>
+          </div>
+          <div class="stat stat--live">
+            <dt>Researcher responses</dt>
+            <dd v-if="state === 'ready' || totalSubmissions > 0" class="tabular">
+              {{ totalSubmissions }}
+              <span v-if="uniqueSubmitters > 0" class="stat__sub">from {{ uniqueSubmitters }} people</span>
+            </dd>
+            <dd v-else-if="state === 'loading'" class="stat__pending">checking…</dd>
+            <dd v-else class="stat__pending">not available right now</dd>
+          </div>
+        </dl>
 
-    <section class="controls card" aria-label="Legend and view controls">
-      <FamiliarityLegend :show-scale="true" />
-      <div class="control-right">
-        <div class="sample" :class="{ low: total > 0 && total < lowSample }">
-          <strong>n = {{ total }}</strong>
-          <span class="small muted">{{ total === 1 ? 'researcher' : 'researchers' }}</span>
-        </div>
-        <div class="viewtoggle" role="group" aria-label="View">
-          <button :class="{ active: view === 'table' }" :aria-pressed="view === 'table'" @click="view = 'table'">
-            Table
-          </button>
-          <button :class="{ active: view === 'heatmap' }" :aria-pressed="view === 'heatmap'" @click="view = 'heatmap'">
-            Heatmap
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <p v-if="total > 0 && total < lowSample" class="small low-note">
-      Sample size is small (n &lt; {{ lowSample }}). Values are shown but should be
-      read as provisional.
-    </p>
-
-    <!-- Loading / cold-start -->
-    <LoadingState
-      v-if="state.loading && !state.loaded"
-      :waking="state.waking"
-      :attempt="state.wakeAttempt"
-      :total="state.wakeTotal"
-    />
-
-    <!-- Error -->
-    <div v-else-if="state.error && !state.loaded" class="notice notice-warn error-box" role="alert">
-      <p>{{ state.error }}</p>
-      <button class="btn" @click="reload">Try again</button>
-    </div>
-
-    <!-- Empty state: framework loaded but no ratings yet -->
-    <template v-else>
-      <div v-if="!hasAnyRatings" class="empty card">
-        <h2>No submissions yet</h2>
-        <p class="muted">
-          The framework of research areas is shown below. Be the first to record
-          your familiarity — the heatmap fills in as researchers submit.
+        <p class="hero__cta">
+          <a class="btn" href="#priorities">Start with where effort pays off</a>
+          <RouterLink class="btn btn--quiet" to="/methodology">How to read the ratings →</RouterLink>
         </p>
       </div>
+    </section>
 
-      <FrameworkTable v-if="view === 'table'" :areas="areas" :low-sample="lowSample" />
-      <HeatmapGrid v-else :areas="areas" :low-sample="lowSample" />
-    </template>
+    <section ref="gridSection" id="grid" class="section">
+      <div class="wrap">
+        <AreaHeatmap v-model:source="source" v-model:scenario="scenario" :selected="selected" @select="onSelect" />
 
-    <SubmissionForm
-      v-if="showForm"
-      :areas="areas"
-      @close="showForm = false"
-      @submitted="onSubmitted"
-    />
+        <!-- Always here, selected or not, so the grid never shifts under the
+             pointer and the reader knows where the detail will appear. -->
+        <div ref="detailSlot" class="detail" :class="{ 'detail--empty': !selected }">
+          <DrillDownPanel
+            v-if="selected"
+            :problem-id="selected.problemId"
+            :area-name="selected.areaName"
+            :source="source"
+            :scenario="scenario"
+            @close="selected = null"
+          />
+          <p v-else class="detail__prompt">
+            Click any cell above to open it here: the problem, the area, and every agenda behind that
+            cell, with the box for telling us where the rating is wrong.
+          </p>
+        </div>
+
+        <div class="legendwrap">
+          <TierLegend />
+        </div>
+      </div>
+    </section>
+
+    <section id="priorities" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Focus areas</p>
+        <h2>Where the next unit of effort pays off most</h2>
+        <FocusAreas
+          v-model:source="source"
+          @focus-problem="focusProblem"
+          @focus-area="focusArea"
+        />
+      </div>
+    </section>
+
+    <section id="agendas" class="section">
+      <div class="wrap">
+        <AgendaHeatmap />
+      </div>
+    </section>
+
+    <section id="swiss" class="section">
+      <div class="wrap">
+        <SwissCheesePanel />
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.page {
-  padding-top: 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+.hero {
+  padding-block: clamp(2.5rem, 1.5rem + 4vw, 5rem) clamp(2rem, 1rem + 3vw, 3.5rem);
 }
-.intro {
-  max-width: 74ch;
+
+.hero__badge {
+  display: inline-block;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.15rem 0.7rem;
+  margin: 0 0 1rem;
 }
-.intro h1 {
-  font-size: clamp(1.6rem, 3.5vw, 2.3rem);
-  margin: 0 0 10px;
+
+.hero__title {
+  max-width: 20ch;
 }
-.lede {
-  font-size: 1.08rem;
-  color: var(--text-secondary);
-  margin: 0 0 18px;
+
+.hero__lead {
+  font-size: 1.0625rem;
+  color: var(--ink-secondary);
+  max-width: 62ch;
 }
-.intro-actions {
+
+.hero__invite {
+  font-size: 0.9375rem;
+  color: var(--ink);
+  max-width: 62ch;
+  border-left: 3px solid var(--rule-strong);
+  padding-left: 0.85rem;
+}
+
+.hero__stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 2.25rem;
+  margin: 2rem 0 1.75rem;
 }
-.flash {
-  border-left-color: var(--good);
-  color: var(--text-primary);
+
+.stat dt {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-muted);
+  font-weight: 600;
 }
-.controls {
+
+.stat dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.stat__sub {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.stat__pending {
+  font-size: 0.9375rem;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.hero__cta {
   display: flex;
   flex-wrap: wrap;
+  gap: 0.75rem;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
 }
-.control-right {
-  display: flex;
-  align-items: center;
-  gap: 18px;
+
+.hero__cta .btn {
+  text-decoration: none;
 }
-.sample {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
+
+.detail {
+  scroll-margin-top: 1rem;
 }
-.sample.low strong {
-  color: #9a6a00;
+
+.detail--empty {
+  margin-top: 1.25rem;
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius-lg);
+  padding: 0.9rem 1.1rem;
 }
-.viewtoggle {
-  display: inline-flex;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  overflow: hidden;
-}
-.viewtoggle button {
-  padding: 7px 14px;
-  border: 0;
-  background: var(--surface-1);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-weight: 500;
-}
-.viewtoggle button.active {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-.low-note {
-  color: #9a6a00;
-  margin: -4px 2px 0;
-}
-@media (prefers-color-scheme: dark) {
-  .low-note {
-    color: #e0b050;
-  }
-  .sample.low strong {
-    color: #e0b050;
-  }
-}
-.error-box {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
-}
-.empty {
-  padding: 22px;
-}
-.empty h2 {
-  margin: 0 0 6px;
-  font-size: 1.2rem;
-}
-.empty p {
+
+.detail__prompt {
   margin: 0;
-  max-width: 60ch;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+  max-width: var(--measure);
+}
+
+.legendwrap {
+  margin-top: 1.5rem;
+  max-width: 780px;
 }
 </style>

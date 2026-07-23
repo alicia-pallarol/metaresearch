@@ -1,90 +1,85 @@
-// Package config loads runtime configuration exclusively from environment
-// variables. No secrets are ever hard-coded; see .env.example for the contract.
+// Package config loads runtime configuration from the environment.
+// No secret is ever hard-coded; every value below comes from an env var.
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 )
 
-// Config holds all runtime configuration for the API server.
 type Config struct {
-	// DatabaseURL is the Postgres connection string (e.g. from Neon).
+	// DatabaseURL is the Postgres connection string (Neon pooled URL in production).
+	// May be empty: the service then runs in degraded mode (map still served by the
+	// frontend, feedback writes rejected with 503) which is handy for frontend dev.
 	DatabaseURL string
-	// Port is the TCP port to listen on. Render provides this via $PORT.
-	Port string
-	// AllowedOrigins is the set of exact origins permitted by CORS.
-	// Comma-separated in the env var; "*" is accepted for local dev only.
-	AllowedOrigins []string
-	// IPHashSalt salts the per-IP hash used only for rate limiting.
+	// AllowedOrigin is the exact frontend origin allowed by CORS, e.g.
+	// https://ai-safety-atlas.pages.dev. "*" is rejected on purpose.
+	AllowedOrigin string
+	// AdminToken guards GET /api/admin/export. Empty disables the endpoint.
+	AdminToken string
+	Port       string
+	// TurnstileSecret enables Cloudflare Turnstile verification when set.
+	TurnstileSecret string
+	// IPHashSalt salts the sha256 of the client IP. When empty a random salt is
+	// generated at boot, which keeps hashes unlinkable across restarts.
 	IPHashSalt string
-	// MigrationsPath points at the directory of .sql migration files.
-	MigrationsPath string
-	// LowSampleThreshold: below this many ratings an area is flagged low-sample.
-	LowSampleThreshold int
-	// RateLimitPerHour caps submissions per hashed IP per rolling hour.
-	RateLimitPerHour int
-	// ExposeContributors, when true, allows the API to return the names of
-	// non-anonymous contributors. Defaults to false (aggregates only).
-	ExposeContributors bool
+	// Iteration is stamped on every stored row so feedback stays attached to the
+	// version of the map it was given against.
+	Iteration int
 }
 
-// Load reads configuration from the environment, applying sane defaults and
-// validating that the required values are present.
-func Load() (*Config, error) {
-	c := &Config{
-		DatabaseURL:        os.Getenv("DATABASE_URL"),
-		Port:               getenv("PORT", "8080"),
-		IPHashSalt:         os.Getenv("IP_HASH_SALT"),
-		MigrationsPath:     getenv("MIGRATIONS_PATH", ""),
-		LowSampleThreshold: getenvInt("LOW_SAMPLE_THRESHOLD", 3),
-		RateLimitPerHour:   getenvInt("RATE_LIMIT_PER_HOUR", 5),
-		ExposeContributors: getenvBool("EXPOSE_CONTRIBUTORS", false),
+// Load reads the environment and validates it. It returns a human-readable error
+// rather than panicking so the operator sees what is missing in the deploy logs.
+func Load() (Config, error) {
+	c := Config{
+		DatabaseURL:     strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		AllowedOrigin:   strings.TrimSpace(os.Getenv("ALLOWED_ORIGIN")),
+		AdminToken:      strings.TrimSpace(os.Getenv("ADMIN_TOKEN")),
+		Port:            strings.TrimSpace(os.Getenv("PORT")),
+		TurnstileSecret: strings.TrimSpace(os.Getenv("TURNSTILE_SECRET")),
+		IPHashSalt:      strings.TrimSpace(os.Getenv("IP_HASH_SALT")),
 	}
 
-	origin := getenv("ALLOWED_ORIGIN", "http://localhost:5173")
-	for _, o := range strings.Split(origin, ",") {
-		if o = strings.TrimSpace(o); o != "" {
-			c.AllowedOrigins = append(c.AllowedOrigins, o)
+	if c.Port == "" {
+		c.Port = "8080"
+	}
+	if _, err := strconv.Atoi(c.Port); err != nil {
+		return c, fmt.Errorf("PORT must be a number, got %q", c.Port)
+	}
+
+	if c.AllowedOrigin == "" {
+		return c, fmt.Errorf("ALLOWED_ORIGIN is required (exact frontend origin, e.g. https://example.pages.dev)")
+	}
+	if c.AllowedOrigin == "*" {
+		return c, fmt.Errorf("ALLOWED_ORIGIN must be an exact origin, not \"*\"")
+	}
+	if !strings.HasPrefix(c.AllowedOrigin, "http://") && !strings.HasPrefix(c.AllowedOrigin, "https://") {
+		return c, fmt.Errorf("ALLOWED_ORIGIN must include the scheme, got %q", c.AllowedOrigin)
+	}
+	c.AllowedOrigin = strings.TrimSuffix(c.AllowedOrigin, "/")
+
+	if raw := strings.TrimSpace(os.Getenv("ITERATION")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return c, fmt.Errorf("ITERATION must be a non-negative integer, got %q", raw)
 		}
+		c.Iteration = n
 	}
 
-	if c.DatabaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL is required")
-	}
 	if c.IPHashSalt == "" {
-		// A missing salt would make IP hashes trivially reversible; refuse to run.
-		return nil, fmt.Errorf("IP_HASH_SALT is required (use a long random string)")
+		buf := make([]byte, 32)
+		if _, err := rand.Read(buf); err != nil {
+			return c, fmt.Errorf("generating IP hash salt: %w", err)
+		}
+		c.IPHashSalt = hex.EncodeToString(buf)
 	}
-	if len(c.AllowedOrigins) == 0 {
-		return nil, fmt.Errorf("ALLOWED_ORIGIN is required")
-	}
+
 	return c, nil
 }
 
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func getenvInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
-}
-
-func getenvBool(key string, def bool) bool {
-	if v := os.Getenv(key); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			return b
-		}
-	}
-	return def
-}
+// Degraded reports whether the service is running without a database.
+func (c Config) Degraded() bool { return c.DatabaseURL == "" }

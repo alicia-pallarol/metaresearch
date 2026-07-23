@@ -1,0 +1,26 @@
+# Secrets — only the .env.example files belong in the repo.
+.env
+.env.local
+*.env
+!.env.example
+
+# Node
+node_modules/
+dist/
+
+# Go
+backend/server
+backend/server.exe
+
+# Source workbooks are optional provenance the operator keeps locally.
+# Uncomment to commit them instead.
+data/source/*.xlsx
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Python
+__pycache__/
+*.pyc

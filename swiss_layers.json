@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "Interpretive overlay for the Swiss-cheese defence-in-depth view (Phase 2).",
+    "EMPTY BY DEFAULT AND HIDDEN IN THE UI. Nothing here comes from the verified matrix.",
+    "",
+    "A Swiss-cheese model needs three things: an ordered set of defensive layers, layers",
+    "that are roughly independent of each other, and holes in each layer against a specific",
+    "hazard. Only the third is in data/atlas.json, a weak tier is a big hole. The ordering",
+    "and the independence assumption are editorial research judgments that the workbook does",
+    "not contain, and the dataset's own reading note argues these defences are correlated:",
+    "the load-bearing problems all lean on measurement and oversight, and the single Robust",
+    "cell (sandboxing against P7) inherits its reliability from ordinary systems security.",
+    "",
+    "So: authoring layers here is a research claim, not a configuration step. Add layers only",
+    "once you can defend the ordering and say something honest about the correlation between",
+    "them. Hole sizes stay derived from the matrix; the caveat below stays on screen.",
+    "",
+    "To author: set enabled to true and add layers, outermost defence first. Each member is",
+    "an area tag (EA, IN, AR, DS, SO, AF, CE, SA, SH, ST, SM, TG) or an agenda id (EA1, DS3, ...).",
+    "Example layer: { \"id\": \"deployment\", \"name\": \"Deployment controls\",",
+    "                 \"rationale\": \"why this sits here in the order\", \"members\": [\"DS\", \"SH2\"] }"
+  ],
+  "enabled": false,
+  "default_hazard": "P4",
+  "caveat": "Layer ordering and independence are editorial assumptions, not results from the verified matrix; the underlying data suggests these defences are correlated.",
+  "layers": []
+}

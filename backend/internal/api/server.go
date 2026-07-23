@@ -1,90 +1,82 @@
+// Package api wires the four HTTP endpoints of the service. There is exactly one
+// write path (POST /api/feedback); everything else is read-only or aggregate.
 package api
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-
-	"github.com/saige/backend/internal/config"
-	"github.com/saige/backend/internal/store"
+	"ai-safety-atlas/backend/internal/config"
+	"ai-safety-atlas/backend/internal/store"
 )
 
-// Server holds handler dependencies.
-type Server struct {
-	cfg     *config.Config
-	store   *store.Store
-	limiter *rateLimiter
-	origins map[string]bool
+// Storage is what the API needs from the persistence layer.
+type Storage interface {
+	InsertFeedback(ctx context.Context, f store.Feedback) error
+	Summary(ctx context.Context, iteration int) (store.Summary, error)
+	Export(ctx context.Context, limit int) ([]store.ExportRow, error)
+	Ping(ctx context.Context) error
 }
 
-// NewServer builds the HTTP handler graph.
-func NewServer(cfg *config.Config, st *store.Store) http.Handler {
+// Server holds the dependencies of the HTTP layer.
+type Server struct {
+	cfg       config.Config
+	store     Storage // nil in degraded mode (no DATABASE_URL)
+	limiter   *RateLimiter
+	summary   *summaryCache
+	turnstile *turnstileVerifier
+}
+
+const summaryTTL = 45 * time.Second
+
+// New builds a Server. A nil store is allowed and puts the service in degraded
+// mode: reads answer with empty aggregates, writes answer 503.
+func New(cfg config.Config, st Storage) *Server {
 	s := &Server{
 		cfg:     cfg,
 		store:   st,
-		limiter: newRateLimiter(cfg.RateLimitPerHour, time.Hour),
-		origins: map[string]bool{},
+		limiter: NewRateLimiter(5, 30),
 	}
-	for _, o := range cfg.AllowedOrigins {
-		s.origins[o] = true
+	if st != nil {
+		s.summary = newSummaryCache(st, cfg.Iteration, summaryTTL)
 	}
-
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
-	r.Use(s.securityHeaders)
-	r.Use(s.cors)
-
-	r.Get("/api/health", s.handleHealth)
-	r.Get("/api/research-areas", s.handleResearchAreas)
-	r.Post("/api/submissions", s.handleSubmit)
-	if cfg.ExposeContributors {
-		r.Get("/api/contributors", s.handleContributors)
+	if cfg.TurnstileSecret != "" {
+		s.turnstile = newTurnstileVerifier(cfg.TurnstileSecret)
 	}
-
-	return r
+	return s
 }
 
-// securityHeaders sets conservative headers on every API response. The API
-// serves JSON only, so a very strict CSP is appropriate.
-func (s *Server) securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-		h.Set("Cross-Origin-Resource-Policy", "same-site")
-		next.ServeHTTP(w, r)
-	})
+// Handler returns the routed, middleware-wrapped handler.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("GET /api/summary", s.handleSummary)
+	mux.HandleFunc("POST /api/feedback", s.handleFeedback)
+	mux.HandleFunc("GET /api/admin/export", s.handleExport)
+
+	return s.recoverPanics(s.cors(s.logRequests(mux)))
 }
 
-// cors permits only the configured origins and echoes them back explicitly.
+// cors answers preflights and stamps the single allowed origin. Anything else
+// gets no CORS headers at all, so the browser blocks it.
 func (s *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		allowed := s.origins["*"] || s.origins[origin]
-		if allowed && origin != "" {
-			if s.origins["*"] {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-			} else {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Vary", "Origin")
-			}
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			w.Header().Set("Access-Control-Max-Age", "86400")
+		if origin != "" && origin == s.cfg.AllowedOrigin {
+			h := w.Header()
+			h.Set("Access-Control-Allow-Origin", s.cfg.AllowedOrigin)
+			h.Set("Vary", "Origin")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			h.Set("Access-Control-Max-Age", "86400")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -94,36 +86,95 @@ func (s *Server) cors(next http.Handler) http.Handler {
 	})
 }
 
-// ---- helpers ----
+func (s *Server) logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		// Deliberately no query string, no body, no email, no notes: nothing a
+		// submission carries should ever reach the logs.
+		slog.Info("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+	})
+}
 
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+func (s *Server) recoverPanics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("panic recovered", "path", r.URL.Path, "panic", rec)
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// writeJSON emits a JSON body. Struct fields carry no HTML, and the encoder
+// escapes <, > and & by default, so feedback text cannot break out of the JSON.
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-type errorResponse struct {
-	Error  string            `json:"error"`
-	Fields []validationError `json:"fields,omitempty"`
-}
-
-func writeError(w http.ResponseWriter, status int, msg string, fields ...validationError) {
-	writeJSON(w, status, errorResponse{Error: msg, Fields: fields})
-}
-
-// hashIP returns an HMAC-SHA256 of the client IP salted with the configured
-// secret. The raw IP is never stored or logged.
-func (s *Server) hashIP(r *http.Request) string {
-	ip := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		ip = host
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("writing response", "error", err)
 	}
-	mac := hmac.New(sha256.New, []byte(s.cfg.IPHashSalt))
-	mac.Write([]byte(strings.ToLower(ip)))
-	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// withTimeout derives a request-scoped context with a hard cap.
-func withTimeout(r *http.Request, d time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(r.Context(), d)
+// writeError returns a structured error. Internal detail never leaves the process.
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// clientIP prefers the left-most X-Forwarded-For entry, which is what Render's
+// proxy sets. It is only ever used salted-and-hashed, or as a rate-limit key.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if first, _, ok := strings.Cut(xff, ","); ok {
+			return strings.TrimSpace(first)
+		}
+		return strings.TrimSpace(xff)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// hashIP is a salted sha256. The raw address is never stored or logged.
+func hashIP(salt, ip string) string {
+	if ip == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(salt + "|" + ip))
+	return hex.EncodeToString(sum[:])
+}
+
+// bearerTokenOK compares in constant time so the admin token cannot be probed
+// byte by byte.
+func bearerTokenOK(header, expected string) bool {
+	if expected == "" {
+		return false
+	}
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	got := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	return subtle.ConstantTimeCompare([]byte(got), []byte(expected)) == 1
 }

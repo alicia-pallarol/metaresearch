@@ -2,130 +2,187 @@ package api
 
 import (
 	"encoding/json"
-	"io"
+	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
-	"github.com/saige/backend/internal/store"
+	"ai-safety-atlas/backend/internal/store"
 )
 
-// handleHealth reports liveness and database connectivity. The frontend pings
-// this to detect (and wait out) a cold start on the free hosting tier.
+// handleHealth is also what the frontend pings to wake a cold-started instance.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := withTimeout(r, 5*time.Second)
-	defer cancel()
-	status := "ok"
-	code := http.StatusOK
-	if err := s.store.Ping(ctx); err != nil {
-		status, code = "degraded", http.StatusServiceUnavailable
-	}
-	writeJSON(w, code, map[string]string{"status": status})
-}
-
-// handleResearchAreas returns the framework plus aggregate familiarity stats.
-// It exposes only aggregates — never emails or individual submissions.
-func (s *Server) handleResearchAreas(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := withTimeout(r, 15*time.Second)
-	defer cancel()
-
-	agg, err := s.store.AreaAggregates(ctx, s.cfg.LowSampleThreshold)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to load research areas.")
+	if s.store == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "degraded",
+			"detail": "no database configured; feedback submission is disabled",
+		})
 		return
 	}
-	writeJSON(w, http.StatusOK, agg)
+	ctx, cancel := contextWithTimeout(r, 3*time.Second)
+	defer cancel()
+	if err := s.store.Ping(ctx); err != nil {
+		slog.Error("health ping failed", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "degraded"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-const maxBodyBytes = 64 * 1024
-
-// handleSubmit validates and stores a familiarity submission. A repeat email
-// replaces its prior submission. A filled honeypot is silently accepted.
-func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := withTimeout(r, 15*time.Second)
+// handleSummary returns aggregates only. Individual submissions are never
+// readable through the public API.
+func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeJSON(w, http.StatusOK, store.Summary{
+			Iteration: s.cfg.Iteration,
+			PerArea:   map[string]*store.RatingSummary{},
+			PerAgenda: map[string]*store.RatingSummary{},
+		})
+		return
+	}
+	ctx, cancel := contextWithTimeout(r, 8*time.Second)
 	defer cancel()
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	var req submissionRequest
+	sum, err := s.summary.Get(ctx)
+	if err != nil {
+		slog.Error("summary failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "summary temporarily unavailable")
+		return
+	}
+	if sum.PerArea == nil {
+		sum.PerArea = map[string]*store.RatingSummary{}
+	}
+	if sum.PerAgenda == nil {
+		sum.PerAgenda = map[string]*store.RatingSummary{}
+	}
+	w.Header().Set("Cache-Control", "public, max-age=30")
+	writeJSON(w, http.StatusOK, sum)
+}
+
+// handleFeedback is the only write path in the system.
+func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	if !s.limiter.Allow(ip) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "too many submissions, please wait a minute")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
+
+	var req FeedbackRequest
 	if err := dec.Decode(&req); err != nil {
-		if err == io.EOF {
-			writeError(w, http.StatusBadRequest, "Request body is empty.")
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "Malformed request body.")
+		writeError(w, http.StatusBadRequest, "malformed JSON body")
 		return
 	}
 
-	// Honeypot: a real user cannot fill a hidden field. Pretend success without
-	// persisting anything, so bots get no signal.
-	if req.Honeypot != "" {
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"status": "created", "replaced": false,
+	// Honeypot: answer as if it worked so a bot gets no signal to adapt to.
+	if req.Website != "" {
+		slog.Info("honeypot triggered")
+		writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
+		return
+	}
+
+	clean, verr := Validate(req)
+	if verr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":  "validation failed",
+			"field":  verr.Field,
+			"detail": verr.Message,
 		})
 		return
 	}
 
-	tagToID, err := s.store.TagToID(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to load research areas.")
+	if s.store == nil {
+		writeError(w, http.StatusServiceUnavailable, "feedback storage is not configured")
 		return
 	}
 
-	email, name, ratings, verrs := req.validate(tagToID)
-	if len(verrs) > 0 {
-		writeError(w, http.StatusUnprocessableEntity, "Please correct the highlighted fields.", verrs...)
-		return
+	ctx, cancel := contextWithTimeout(r, 8*time.Second)
+	defer cancel()
+
+	if s.turnstile != nil {
+		if err := s.turnstile.Verify(ctx, req.TurnstileToken, ip); err != nil {
+			slog.Warn("turnstile verification failed", "error", err)
+			writeError(w, http.StatusForbidden, "bot check failed, please reload and try again")
+			return
+		}
 	}
 
-	// Rate limit: in-memory window first (cheap), then a durable DB count.
-	ipHash := s.hashIP(r)
-	if !s.limiter.allow(ipHash) {
-		writeError(w, http.StatusTooManyRequests, "Too many submissions from your network. Please try again later.")
-		return
-	}
-	since := time.Now().Add(-time.Hour)
-	if n, err := s.store.CountRecentByIPHash(ctx, ipHash, since); err == nil && n >= s.cfg.RateLimitPerHour {
-		writeError(w, http.StatusTooManyRequests, "Too many submissions from your network. Please try again later.")
-		return
-	}
-
-	// If anonymous, never persist the display name; keep only the email (for
-	// deduplication) and force contact_consent off.
-	storedName := name
-	contactConsent := req.ContactConsent
-	if req.Anonymous {
-		storedName = ""
-		contactConsent = false
-	}
-
-	replaced, err := s.store.UpsertSubmission(ctx, store.SubmissionInput{
-		Email:          email,
-		Name:           storedName,
-		Anonymous:      req.Anonymous,
-		ContactConsent: contactConsent,
-		IPHash:         ipHash,
-		Ratings:        ratings,
+	err := s.store.InsertFeedback(ctx, store.Feedback{
+		AgendaID:        clean.AgendaID,
+		AreaTag:         clean.AreaTag,
+		ProblemID:       clean.ProblemID,
+		AreaMaturity:    clean.AreaMaturity,
+		SubareaMaturity: clean.SubareaMaturity,
+		Familiarity:     clean.Familiarity,
+		Notes:           clean.Notes,
+		SubmitterName:   clean.Name,
+		SubmitterEmail:  clean.Email,
+		IsAnonymous:     clean.IsAnonymous,
+		ContactConsent:  clean.ContactConsent,
+		ReuseConsent:    clean.ReuseConsent,
+		SubmitterToken:  clean.SubmitterToken,
+		Iteration:       s.cfg.Iteration,
+		IPHash:          hashIP(s.cfg.IPHashSalt, ip),
+		UserAgent:       truncateRunes(r.UserAgent(), MaxUARunes),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save your submission.")
+		// The error may quote SQL or connection details; log it, do not return it.
+		slog.Error("storing feedback failed", "agenda_id", clean.AgendaID, "area_tag", clean.AreaTag, "problem_id", clean.ProblemID, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not store your feedback, please try again")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"status": "created", "replaced": replaced,
-	})
+	s.summary.Invalidate()
+	writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
 }
 
-// handleContributors returns names of non-anonymous contributors. Disabled
-// unless EXPOSE_CONTRIBUTORS=true. Never returns emails.
-func (s *Server) handleContributors(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := withTimeout(r, 10*time.Second)
-	defer cancel()
-	names, err := s.store.ContributorNames(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to load contributors.")
+// handleExport returns raw rows, including names and emails, to the operator.
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	if !bearerTokenOK(r.Header.Get("Authorization"), s.cfg.AdminToken) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="admin"`)
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"contributors": names})
+	if s.store == nil {
+		writeError(w, http.StatusServiceUnavailable, "no database configured")
+		return
+	}
+	if f := r.URL.Query().Get("format"); f != "" && f != "json" {
+		writeError(w, http.StatusBadRequest, "only format=json is supported")
+		return
+	}
+	limit := 10000
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = n
+	}
+
+	ctx, cancel := contextWithTimeout(r, 20*time.Second)
+	defer cancel()
+
+	rows, err := s.store.Export(ctx, limit)
+	if err != nil {
+		slog.Error("export failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "export failed")
+		return
+	}
+	// Downloaded, never rendered as a page: no HTML context, and the JSON encoder
+	// escapes <, > and & regardless.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", `attachment; filename="feedback-export.json"`)
+	writeJSON(w, http.StatusOK, map[string]any{"count": len(rows), "rows": rows})
 }
