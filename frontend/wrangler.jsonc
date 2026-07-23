@@ -1,0 +1,23 @@
+{
+  // Cloudflare Workers Static Assets config for the frontend.
+  //
+  // This account no longer offers the Pages "Connect to Git" creation flow, so
+  // the same Vite build (frontend/dist) is served as an *assets-only* Worker:
+  // there is no server-side script ("main"), every request is answered straight
+  // from ./dist. See MANUAL_SETUP.md Step 4 — this replaces the Pages project.
+  //
+  // The Workers build runs, in this directory:
+  //   npm install && npm run build     # -> ./dist
+  //   npx wrangler deploy              # reads this file, uploads ./dist
+  // so set the build's Root directory to `frontend`.
+  "name": "metaresearch",
+  "compatibility_date": "2026-07-23",
+  "assets": {
+    "directory": "./dist",
+    // Serve index.html (HTTP 200) for any path that is not a built asset, so
+    // client routes like /agenda/DS1 resolve on a hard refresh. This is the
+    // Workers equivalent of the SPA catch-all in public/_redirects; the CSP and
+    // security headers in public/_headers are applied by Static Assets as-is.
+    "not_found_handling": "single-page-application"
+  }
+}
