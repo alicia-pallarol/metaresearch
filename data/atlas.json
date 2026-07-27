@@ -29,7 +29,7 @@
       "1": "General awareness but not active knowledge",
       "2": "Moderate familiarity, I follow work in this area",
       "3": "High familiarity, I have worked in or closely adjacent to this area",
-      "4": "Expert, I work directly in this area"
+      "4": "Expert, I consider myself one of the leading voices in this area"
     },
     "notes": {
       "Source of the scale": "Taken from the supplied maturity assessment table, which uses Robust (small scale), Strong existence proof, Untested, Never demonstrated and Contested position. One tier was added: Early / partial, which absorbs the reference table's 'Strong, unexplained'. Untested and Never demonstrated are kept apart on purpose: no evidence and negative evidence are different findings.",

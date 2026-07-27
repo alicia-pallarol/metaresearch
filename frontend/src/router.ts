@@ -6,6 +6,7 @@ import HomeView from '@/pages/HomeView.vue'
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'home', component: HomeView },
   { path: '/agenda/:id', name: 'agenda', component: () => import('@/pages/AgendaView.vue') },
+  { path: '/about', name: 'about', component: () => import('@/pages/AboutView.vue') },
   { path: '/methodology', name: 'methodology', component: () => import('@/pages/MethodologyView.vue') },
   { path: '/privacy', name: 'privacy', component: () => import('@/pages/PrivacyView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },

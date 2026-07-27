@@ -346,8 +346,8 @@ function submitAnother(): void {
         <div class="fs">
           <label for="fb-notes">Further comments <span class="opt-note">optional</span></label>
           <p class="fs__hint">
-            The reasoning behind your ratings, work we have missed, a rating you think is wrong, or
-            anything else worth putting on the record.
+            The reasoning behind your ratings, work we have missed, or anything else worth putting on
+            the record.
           </p>
           <textarea
             id="fb-notes"

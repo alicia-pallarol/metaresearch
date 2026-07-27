@@ -181,10 +181,11 @@ const tooltip = computed(() => {
     x: target.x,
     y: target.y,
     above: target.above,
-    // Same title as the drill-down panel: the column (area) first, then the row
-    // (problem), horizontal coordinate before vertical, as coordinates read.
+    // Same title as the drill-down panel: the problem first, then the area (with
+    // its tag, e.g. "Interpretability (IN)").
     title: {
       area: target.areaName,
+      areaTag,
       problemId: problem?.id ?? target.problemId,
       problemName: problem?.name ?? '',
     },
@@ -245,7 +246,7 @@ const SOURCE_OPTIONS = [
 
 const SCENARIO_OPTIONS = [
   { value: 'best' as const, label: 'Best case' },
-  { value: 'typical' as const, label: 'Typical' },
+  { value: 'typical' as const, label: 'Average' },
   { value: 'worst' as const, label: 'Worst case' },
 ]
 
@@ -355,7 +356,7 @@ function tipChipStyle(tier: Tier | null) {
       >
         <div class="tip__head">
           <!-- prettier-ignore -->
-          <span class="tip__title">{{ tooltip.title.area }} <span class="tip__x">×</span> <span class="tabular">{{ tooltip.title.problemId }}</span> {{ tooltip.title.problemName }}</span>
+          <span class="tip__title"><span class="tabular">{{ tooltip.title.problemId }}</span> {{ tooltip.title.problemName }} <span class="tip__x">×</span> {{ tooltip.title.area }} <span class="tip__atag">({{ tooltip.title.areaTag }})</span></span>
           <span class="tip__summary">{{ tooltip.summary }}</span>
         </div>
 
@@ -660,6 +661,11 @@ function tipChipStyle(tier: Tier | null) {
   white-space: nowrap;
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.tip__atag {
+  color: var(--ink-muted);
+  font-weight: 400;
 }
 
 .tip__atier {

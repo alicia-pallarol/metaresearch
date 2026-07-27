@@ -26,7 +26,7 @@ mkdirSync(outDir, { recursive: true })
 for (const [from, to] of files) {
   const src = resolve(repoRoot, from)
   if (!existsSync(src)) {
-    console.error(`copy-data: missing ${from} — the build needs it, aborting.`)
+    console.error(`copy-data: missing ${from}, the build needs it, aborting.`)
     process.exit(1)
   }
   copyFileSync(src, resolve(outDir, to))

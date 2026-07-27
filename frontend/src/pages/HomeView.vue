@@ -80,8 +80,7 @@ async function focusArea(areaTag: string): Promise<void> {
   <div>
     <section class="hero">
       <div class="wrap">
-        <p class="hero__badge">{{ atlas.meta.iteration_label }}</p>
-        <h1 class="hero__title">{{ atlas.meta.title }}</h1>
+        <h1 class="hero__title">The Map</h1>
         <p class="hero__lead">
           {{ atlas.agendas.length }} research agendas across {{ atlas.areas.length }} areas, rated
           against {{ atlas.problems.length }} open problems in AI safety. Every rating answers one
@@ -91,7 +90,7 @@ async function focusArea(areaTag: string): Promise<void> {
         </p>
         <p class="hero__invite">
           It is a draft put out for correction. Open any cell, then any agenda, to see the reasoning;
-          and if a rating looks wrong or you know a source we missed, tell us right there.
+          then add your own rating, agree or not, or point us to work we missed, right there.
         </p>
 
         <dl class="hero__stats">
@@ -116,6 +115,7 @@ async function focusArea(areaTag: string): Promise<void> {
 
         <p class="hero__cta">
           <a class="btn" href="#priorities">Start with where effort pays off</a>
+          <a class="btn btn--quiet" href="#agendas">Browse every agenda →</a>
           <RouterLink class="btn btn--quiet" to="/methodology">How to read the ratings →</RouterLink>
         </p>
       </div>
@@ -138,7 +138,7 @@ async function focusArea(areaTag: string): Promise<void> {
           />
           <p v-else class="detail__prompt">
             Click any cell above to open it here: the problem, the area, and every agenda behind that
-            cell, with the box for telling us where the rating is wrong.
+            cell, with the box for adding your own rating.
           </p>
         </div>
 
@@ -177,19 +177,6 @@ async function focusArea(areaTag: string): Promise<void> {
 <style scoped>
 .hero {
   padding-block: clamp(2.5rem, 1.5rem + 4vw, 5rem) clamp(2rem, 1rem + 3vw, 3.5rem);
-}
-
-.hero__badge {
-  display: inline-block;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  font-weight: 600;
-  color: var(--ink-secondary);
-  border: 1px solid var(--rule-strong);
-  border-radius: 999px;
-  padding: 0.15rem 0.7rem;
-  margin: 0 0 1rem;
 }
 
 .hero__title {

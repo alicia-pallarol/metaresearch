@@ -7,7 +7,7 @@ import AreaProfileDialog from '@/components/AreaProfileDialog.vue'
 import type { Area } from '@/types/atlas'
 
 onMounted(() => {
-  document.title = 'Methodology · AI Safety Agendas × Problems Map'
+  document.title = 'Methodology · AI Safety Agendas'
 })
 
 const familiarityLevels = ['0', '1', '2', '3', '4'] as const
@@ -49,12 +49,13 @@ const openedArea = ref<Area | null>(null)
           </dd>
         </div>
         <div class="note">
-          <dt>Best case, typical, worst case</dt>
+          <dt>Best case, average, worst case</dt>
           <dd>
             Every cell stands on a set of ratings, the tiers of the agendas behind it, and in the
             community view the tiers those agendas were voted. The second switch reads the strongest
-            quarter of that set, the middle of it, or the weakest quarter. Each band is summarised by
-            its <em>median</em>, never an average: the tiers are names, not numbers, and two of them
+            quarter of that set, the middle of it, or the weakest quarter. The middle band, labelled
+            <em>average</em> on the switch, is summarised by its <em>median</em>, never a numeric
+            mean: the tiers are names, not numbers, and two of them
             (<em>Contested</em>, <em>Never demonstrated</em>) are not rungs on the evidence ladder at
             all. Where a band has no single middle, the weaker tier shows; the map does not round up.
             Below eight ratings the "quarter" is a single rating, so <em>Our research · best case</em>

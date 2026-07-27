@@ -1,4 +1,4 @@
-# Secrets — only the .env.example files belong in the repo.
+# Secrets: only the .env.example files belong in the repo.
 .env
 .env.local
 *.env

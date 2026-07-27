@@ -42,13 +42,13 @@ onMounted(() => {
   <header class="site">
     <div class="wrap site__inner">
       <RouterLink class="site__brand" to="/">
-        <span class="site__name">Agendas × Problems</span>
-        <span class="site__iter">{{ atlas.meta.iteration_label }}</span>
+        <span class="site__name">AI Safety Agendas</span>
       </RouterLink>
 
       <nav class="site__nav" aria-label="Main">
         <RouterLink to="/">Map</RouterLink>
         <RouterLink to="/methodology">Methodology</RouterLink>
+        <RouterLink to="/about">About</RouterLink>
         <RouterLink to="/privacy">Privacy</RouterLink>
         <button
           type="button"
@@ -75,12 +75,9 @@ onMounted(() => {
       </p>
       <p class="foot__links">
         <RouterLink to="/methodology">Methodology</RouterLink>
+        <RouterLink to="/about">About</RouterLink>
         <a href="/data/atlas.json" download>Source data (JSON)</a>
         <RouterLink to="/privacy">Privacy</RouterLink>
-      </p>
-      <p class="foot__note">
-        {{ atlas.meta.iteration_label }}, a draft put out for correction, not a finished result.
-        Ratings are judgments about evidence maturity, not about how important a research area is.
       </p>
     </div>
   </footer>
@@ -112,16 +109,16 @@ onMounted(() => {
   text-decoration: none;
 }
 
+/* A serif wordmark on an otherwise sans page: reads as academic and credible,
+   distinct from the UI, and needs no webfont (system serifs only, so the strict
+   font-src 'self' CSP is untouched). One line by design, a toolbar mark should
+   stay compact rather than stack. */
 .site__name {
+  font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif;
   font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.site__iter {
-  font-size: 0.6875rem;
-  color: var(--ink-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
+  font-size: 1.2rem;
+  letter-spacing: 0;
+  color: var(--ink);
 }
 
 .site__nav {
@@ -175,13 +172,6 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 1.25rem;
   font-size: 0.875rem;
-  margin: 1rem 0;
-}
-
-.foot__note {
-  font-size: 0.8125rem;
-  color: var(--ink-muted);
-  max-width: var(--measure);
-  margin: 0;
+  margin: 1rem 0 0;
 }
 </style>

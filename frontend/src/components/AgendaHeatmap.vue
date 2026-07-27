@@ -7,7 +7,7 @@
  * of agendas with their tiers as wrapped chips, a 12-column table on a phone is
  * a scroll maze, and the chips carry the same information.
  */
-import { ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { atlas, agendasOfArea, cellTier, coverageOf, getAgenda, getProblem, problemIds } from '@/lib/atlas'
 import { describeCell, tierAbbrev, tierStyle } from '@/lib/scales'
@@ -57,6 +57,122 @@ function problemTitle(problemId: string): string {
   const problem = getProblem(problemId)
   return problem ? `${problem.id}, ${problem.name}: ${problem.short_def}` : problemId
 }
+
+/**
+ * Interacting with a cell shows a small popover anchored to it, rather than
+ * navigating away: it names the pair, gives the tier and the problem in words,
+ * and carries the one link out to the agenda's feedback form.
+ *
+ * Hover (or keyboard focus) previews it; a click pins it so it holds still while
+ * you reach for the link, until you click the same cell again, click a different
+ * cell, click away, press Escape, or scroll. A pin always wins over a hover, so a
+ * pinned popover does not shift as the pointer wanders over other cells.
+ */
+const POP_WIDTH = 300
+type PopAnchor = { agendaId: string; problemId: string; x: number; y: number; above: boolean }
+
+const hoverPop = ref<PopAnchor | null>(null)
+const pinnedPop = ref<PopAnchor | null>(null)
+const activePop = computed(() => pinnedPop.value ?? hoverPop.value)
+
+let leaveTimer: ReturnType<typeof setTimeout> | undefined
+
+function anchorAt(el: EventTarget | null, agendaId: string, problemId: string): PopAnchor | null {
+  const rect = (el as HTMLElement | null)?.getBoundingClientRect()
+  if (!rect) return null
+  const above = rect.bottom + 190 > window.innerHeight && rect.top > 190
+  const half = POP_WIDTH / 2
+  const x = Math.min(Math.max(rect.left + rect.width / 2, half + 8), Math.max(window.innerWidth - half - 8, half + 8))
+  return { agendaId, problemId, x, y: above ? rect.top - 8 : rect.bottom + 8, above }
+}
+
+function cancelLeave(): void {
+  if (leaveTimer) {
+    clearTimeout(leaveTimer)
+    leaveTimer = undefined
+  }
+}
+
+function showHover(el: EventTarget | null, agendaId: string, problemId: string): void {
+  cancelLeave()
+  hoverPop.value = anchorAt(el, agendaId, problemId)
+}
+
+// A short grace period so moving between cells, or from a cell onto the popover
+// itself, does not flicker it shut in the gap between the leave and the enter.
+function scheduleLeave(): void {
+  cancelLeave()
+  leaveTimer = setTimeout(() => {
+    hoverPop.value = null
+    leaveTimer = undefined
+  }, 90)
+}
+
+function togglePin(el: EventTarget | null, agendaId: string, problemId: string): void {
+  pinnedPop.value =
+    pinnedPop.value?.agendaId === agendaId && pinnedPop.value.problemId === problemId
+      ? null
+      : anchorAt(el, agendaId, problemId)
+}
+
+function isPinned(agendaId: string, problemId: string): boolean {
+  return pinnedPop.value?.agendaId === agendaId && pinnedPop.value.problemId === problemId
+}
+
+function closeAll(): void {
+  cancelLeave()
+  pinnedPop.value = null
+  hoverPop.value = null
+}
+
+const popInfo = computed(() => {
+  const p = activePop.value
+  if (!p) return null
+  const agenda = getAgenda(p.agendaId)
+  const problem = getProblem(p.problemId)
+  return {
+    x: p.x,
+    y: p.y,
+    above: p.above,
+    agendaId: p.agendaId,
+    agendaName: agenda?.agenda ?? '',
+    problemId: p.problemId,
+    problemName: problem?.name ?? '',
+    problemDef: problem?.short_def ?? '',
+    tier: cellTier(p.agendaId, p.problemId),
+    to: `/agenda/${p.agendaId}#p-${p.problemId}`,
+  }
+})
+
+function onKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') closeAll()
+}
+
+// Only a pinned popover needs dismissing by an outside click; a click on a cell
+// or inside the popover is handled by their own handlers, so it is left alone.
+function onDocClick(e: MouseEvent): void {
+  if (!pinnedPop.value) return
+  const t = e.target as HTMLElement | null
+  if (t?.closest('.pop, .agrid__cellbtn, .alist__chip')) return
+  pinnedPop.value = null
+}
+
+function onScroll(): void {
+  if (pinnedPop.value || hoverPop.value) closeAll()
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKey)
+  document.addEventListener('click', onDocClick)
+  // Capture, so a scroll inside the grid's own overflow container counts too.
+  window.addEventListener('scroll', onScroll, { passive: true, capture: true })
+})
+onBeforeUnmount(() => {
+  cancelLeave()
+  window.removeEventListener('keydown', onKey)
+  document.removeEventListener('click', onDocClick)
+  window.removeEventListener('scroll', onScroll, true)
+})
 </script>
 
 <template>
@@ -127,10 +243,25 @@ function problemTitle(problemId: string): string {
                     hatched: tierStyle(cellTier(agenda.id, pid)).hatched,
                   }"
                   :style="cellStyle(agenda.id, pid)"
-                  :title="cellTitle(agenda.id, pid)"
                 >
-                  <span class="tabular">{{ cellText(agenda.id, pid) }}</span>
-                  <span class="visually-hidden">{{ cellTitle(agenda.id, pid) }}</span>
+                  <button
+                    v-if="cellTier(agenda.id, pid) !== null"
+                    type="button"
+                    class="agrid__cellbtn"
+                    :class="{ 'agrid__cellbtn--on': isPinned(agenda.id, pid) }"
+                    :aria-label="`${cellTitle(agenda.id, pid)}. Show details and feedback link.`"
+                    @mouseenter="showHover($event.currentTarget, agenda.id, pid)"
+                    @mouseleave="scheduleLeave"
+                    @focus="showHover($event.currentTarget, agenda.id, pid)"
+                    @blur="scheduleLeave"
+                    @click="togglePin($event.currentTarget, agenda.id, pid)"
+                  >
+                    <span class="tabular">{{ cellText(agenda.id, pid) }}</span>
+                  </button>
+                  <span v-else class="agrid__cellblank">
+                    <span class="tabular">{{ cellText(agenda.id, pid) }}</span>
+                    <span class="visually-hidden">{{ cellTitle(agenda.id, pid) }}</span>
+                  </span>
                 </td>
                 <td class="agrid__reach tabular">{{ coverageOf(agenda.id) }}/12</td>
               </tr>
@@ -145,24 +276,63 @@ function problemTitle(problemId: string): string {
               <span class="tabular agrid__id">{{ agenda.id }}</span> {{ agenda.agenda }}
             </RouterLink>
             <div class="alist__chips">
-              <span
+              <button
                 v-for="pid in problemIds.filter((p) => cellTier(agenda.id, p) !== null)"
                 :key="pid"
+                type="button"
                 class="alist__chip"
-                :class="{ hatched: tierStyle(cellTier(agenda.id, pid)).hatched }"
+                :class="{ hatched: tierStyle(cellTier(agenda.id, pid)).hatched, 'alist__chip--on': isPinned(agenda.id, pid) }"
                 :style="cellStyle(agenda.id, pid)"
-                :title="cellTitle(agenda.id, pid)"
+                :aria-label="cellTitle(agenda.id, pid)"
+                @mouseenter="showHover($event.currentTarget, agenda.id, pid)"
+                @mouseleave="scheduleLeave"
+                @focus="showHover($event.currentTarget, agenda.id, pid)"
+                @blur="scheduleLeave"
+                @click="togglePin($event.currentTarget, agenda.id, pid)"
               >
                 <span class="tabular">{{ pid }}</span>
                 <span class="alist__chiptier">{{ tierAbbrev(cellTier(agenda.id, pid)) }}</span>
-              </span>
+              </button>
             </div>
           </li>
         </ul>
       </div>
     </section>
+
+    <!-- Info + feedback popover, anchored to the hovered or pinned cell. -->
+    <Teleport to="body">
+      <div
+        v-if="popInfo"
+        class="pop"
+        :class="{ 'pop--above': popInfo.above }"
+        :style="{ left: `${popInfo.x}px`, top: `${popInfo.y}px`, width: `${POP_WIDTH}px` }"
+        role="dialog"
+        aria-label="Cell details"
+        @mouseenter="cancelLeave"
+        @mouseleave="scheduleLeave"
+      >
+        <p class="pop__title">
+          <span class="tabular">{{ popInfo.agendaId }}</span> {{ popInfo.agendaName }}
+          <span class="pop__x">×</span>
+          <span class="tabular">{{ popInfo.problemId }}</span> {{ popInfo.problemName }}
+        </p>
+        <p class="pop__tier">
+          <span
+            class="pop__chip"
+            :class="{ hatched: tierStyle(popInfo.tier).hatched }"
+            :style="{ backgroundColor: tierStyle(popInfo.tier).fill, color: tierStyle(popInfo.tier).ink }"
+            >{{ popInfo.tier }}</span
+          >
+          <span>{{ popInfo.problemDef }}</span>
+        </p>
+        <RouterLink class="pop__fb" :to="popInfo.to" @click="closeAll">
+          Give feedback on {{ popInfo.agendaId }} →
+        </RouterLink>
+      </div>
+    </Teleport>
   </div>
 </template>
+
 
 <style scoped>
 .full__head {
@@ -325,10 +495,39 @@ function problemTitle(problemId: string): string {
 .agrid__cell {
   width: 2.1rem;
   height: 1.6rem;
+  padding: 0;
   text-align: center;
   border-radius: 3px;
   font-size: 0.5625rem;
   font-weight: 700;
+}
+
+/* Each rated cell is a button that opens the info popover in place, the same
+   "click to open the detail" the condensed grid above has, not a hover-only hint. */
+.agrid__cellbtn,
+.agrid__cellblank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+}
+
+.agrid__cellbtn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.agrid__cellbtn:hover,
+.agrid__cellbtn:focus-visible,
+.agrid__cellbtn--on {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
 }
 
 .agrid__cell--blank {
@@ -377,10 +576,20 @@ function problemTitle(problemId: string): string {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+  border: 0;
   border-radius: 3px;
   padding: 0.1rem 0.35rem;
+  font-family: inherit;
   font-size: 0.625rem;
   font-weight: 700;
+  cursor: pointer;
+}
+
+.alist__chip:hover,
+.alist__chip:focus-visible,
+.alist__chip--on {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
 }
 
 .alist__chiptier {
@@ -396,5 +605,53 @@ function problemTitle(problemId: string): string {
   .alist {
     display: none;
   }
+}
+
+.pop {
+  position: fixed;
+  z-index: 61;
+  transform: translate(-50%, 0);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0.7rem 0.8rem;
+  font-size: 0.8125rem;
+}
+
+.pop--above {
+  transform: translate(-50%, -100%);
+}
+
+.pop__title {
+  margin: 0 0 0.45rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.pop__x {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+.pop__tier {
+  margin: 0 0 0.55rem;
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  color: var(--ink-secondary);
+}
+
+.pop__chip {
+  flex: none;
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+}
+
+.pop__fb {
+  font-weight: 500;
 }
 </style>

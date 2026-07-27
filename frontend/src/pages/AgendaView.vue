@@ -18,10 +18,23 @@ const reached = computed(() => (agenda.value ? problemsReachedBy(agenda.value.id
 const stats = computed(() => (agenda.value ? forAgenda(agenda.value.id) : undefined))
 const areaStats = computed(() => (agenda.value ? forArea(agenda.value.area_tag) : undefined))
 
+/**
+ * "best_evidence_against" holds one of two very different things: a list of the
+ * problems this agenda bites hardest on (e.g. "P2, P4"), or a maturity ceiling
+ * when it bites nowhere in particular (e.g. "Early / partial at best"). The label
+ * follows the content so the reader is not told "evidence against" a maturity tier.
+ */
+const bestAgainstIsProblems = computed(() =>
+  /^P\d+(\s*,\s*P\d+)*$/.test((agenda.value?.best_evidence_against ?? '').trim()),
+)
+const bestAgainstLabel = computed(() =>
+  bestAgainstIsProblems.value ? 'Most-targeted problems' : 'Strongest evidence maturity',
+)
+
 function setTitle(): void {
   document.title = agenda.value
-    ? `${agenda.value.id} · ${agenda.value.agenda} · AI Safety Agendas × Problems Map`
-    : 'Agenda not found · AI Safety Agendas × Problems Map'
+    ? `${agenda.value.id} · ${agenda.value.agenda} · AI Safety Agendas`
+    : 'Agenda not found · AI Safety Agendas'
 }
 
 onMounted(setTitle)
@@ -76,7 +89,7 @@ watch(agendaId, () => {
                   </dd>
                 </div>
                 <div>
-                  <dt>Best evidence against</dt>
+                  <dt>{{ bestAgainstLabel }}</dt>
                   <dd>{{ agenda.best_evidence_against }}</dd>
                 </div>
               </div>
@@ -91,7 +104,7 @@ watch(agendaId, () => {
           <section class="card block">
             <h2 class="block__title">Against each problem</h2>
             <ul v-if="reached.length" class="reach">
-              <li v-for="row in reached" :key="row.problem.id" class="reach__item">
+              <li v-for="row in reached" :key="row.problem.id" :id="`p-${row.problem.id}`" class="reach__item">
                 <span
                   class="chip chip--sm"
                   :class="{ hatched: tierStyle(row.tier).hatched }"
@@ -265,6 +278,15 @@ watch(agendaId, () => {
   display: flex;
   gap: 0.6rem;
   align-items: flex-start;
+  /* Clear the sticky header when arrived at from an agenda-grid cell link. */
+  scroll-margin-top: 5rem;
+  border-radius: var(--radius);
+}
+
+/* Landed on from an "Every agenda, every problem" cell: mark which problem. */
+.reach__item:target {
+  outline: 2px solid var(--focus);
+  outline-offset: 5px;
 }
 
 .reach__body {

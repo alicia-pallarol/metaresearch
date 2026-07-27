@@ -8,10 +8,9 @@ import { RouterLink } from 'vue-router'
 import { useSubmitter } from '@/composables/useSubmitter'
 
 const { reset } = useSubmitter()
-const contact = (import.meta.env.VITE_CONTACT_EMAIL ?? '').trim()
 
 onMounted(() => {
-  document.title = 'Privacy · AI Safety Agendas × Problems Map'
+  document.title = 'Privacy · AI Safety Agendas'
 })
 </script>
 
@@ -76,14 +75,8 @@ onMounted(() => {
     <p>
       Under the GDPR you can ask for a copy of what we hold about you, ask for it to be corrected, or
       ask for it to be deleted. Anonymous submissions cannot be traced back to you, so they cannot be
-      individually deleted on request; that is the trade-off anonymity buys.
-      <template v-if="contact">
-        Write to <a :href="`mailto:${contact}`">{{ contact }}</a>.
-      </template>
-      <template v-else>
-        The contact address for these requests is set by the site operator in
-        <code>VITE_CONTACT_EMAIL</code>.
-      </template>
+      individually deleted on request; that is the trade-off anonymity buys. To make a request, reach
+      us through the LinkedIn profiles on the <RouterLink to="/about">About page</RouterLink>.
     </p>
 
     <h2>Retention</h2>

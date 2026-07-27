@@ -4,7 +4,7 @@
   // This account no longer offers the Pages "Connect to Git" creation flow, so
   // the same Vite build (frontend/dist) is served as an *assets-only* Worker:
   // there is no server-side script ("main"), every request is answered straight
-  // from ./dist. See MANUAL_SETUP.md Step 4 — this replaces the Pages project.
+  // from ./dist. See MANUAL_SETUP.md Step 4, this replaces the Pages project.
   //
   // The Workers build runs, in this directory:
   //   npm install && npm run build     # -> ./dist

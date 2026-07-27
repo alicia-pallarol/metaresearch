@@ -306,7 +306,7 @@ function peakCount(values: number[]): number {
 
 export const SCENARIO_LABELS: Record<Scenario, string> = {
   best: 'Best case',
-  typical: 'Typical',
+  typical: 'Average',
   worst: 'Worst case',
 }
 

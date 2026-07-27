@@ -75,7 +75,8 @@ const cellSubject = computed<FeedbackSubject>(() => ({
       <div>
         <p class="eyebrow">Drill-down</p>
         <h3 class="panel__title">
-          {{ area?.name }} <span class="panel__x">×</span> {{ problem?.id }} {{ problem?.name }}
+          <span class="tabular">{{ problem?.id }}</span> {{ problem?.name }}
+          <span class="panel__x">×</span> {{ area?.name }} <span class="panel__tag">({{ area?.tag }})</span>
         </h3>
       </div>
       <button type="button" class="btn btn--quiet" @click="emit('close')">Close ✕</button>
@@ -111,7 +112,7 @@ const cellSubject = computed<FeedbackSubject>(() => ({
       </p>
 
       <p class="panel__feedback">
-        Expand a row to read it, or <strong>open any agenda to tell us where its rating is wrong</strong>.
+        Expand a row to read it, or <strong>open any agenda to add your own rating</strong>.
         To rate this area yourself, and the agendas in this cell, use the box below.
       </p>
 
@@ -158,6 +159,11 @@ const cellSubject = computed<FeedbackSubject>(() => ({
 }
 
 .panel__x {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+.panel__tag {
   color: var(--ink-muted);
   font-weight: 400;
 }
