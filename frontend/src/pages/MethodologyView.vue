@@ -22,9 +22,8 @@ const openedArea = ref<Area | null>(null)
       <p class="eyebrow">About &amp; methodology</p>
       <h1>How to read this map</h1>
       <p class="head__lead">
-        Everything on this site is a manually curated judgment about published work, last checked in
-        {{ atlas.meta.source_check_date }}. No part of the analysis is model-generated, and the
-        running site never calls a model. The dataset is
+        Our research comes from our judgment about published work, last checked in
+        {{ atlas.meta.source_check_date }}. The running site never calls a model. The dataset is
         <a href="/data/atlas.json" download>downloadable in full</a>.
       </p>
     </header>

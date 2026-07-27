@@ -68,11 +68,6 @@ onMounted(() => {
 
   <footer class="foot">
     <div class="wrap foot__inner">
-      <p class="foot__claim">
-        <strong>Manually curated.</strong> Every rating and every note on this site was written by
-        hand from published work. Nothing here is model-generated, and the site calls no model at
-        runtime. Sources last checked {{ atlas.meta.source_check_date }}.
-      </p>
       <p class="foot__links">
         <RouterLink to="/methodology">Methodology</RouterLink>
         <RouterLink to="/about">About</RouterLink>
@@ -159,12 +154,6 @@ onMounted(() => {
 
 .foot__inner {
   padding-block: 2rem 2.75rem;
-}
-
-.foot__claim {
-  font-size: 0.875rem;
-  color: var(--ink-secondary);
-  max-width: var(--measure);
 }
 
 .foot__links {

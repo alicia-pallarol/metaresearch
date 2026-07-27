@@ -3,17 +3,17 @@
  * What everyone else said, before you say it.
  *
  * Two histograms, maturity and familiarity, with the summary statistics that
- * are meaningful for each. Maturity gets a median, a mode and a note when the
- * responses have two peaks, but no mean: the six tiers are names, not numbers,
- * and two of them are not even rungs on the evidence ladder. Familiarity is a
- * 0–3 scale with equal steps, so it does have a mean.
+ * are meaningful for each. Maturity gets the same best/average/worst-case band
+ * the grid itself reads (see lib/community.ts), never a mean: the six tiers
+ * are names, not numbers, and two of them are not even rungs on the evidence
+ * ladder. Familiarity is a 0–3 scale with equal steps, so it does have a mean.
  *
  * The bars are drawn from the same counts the grid's community view is built
  * from, so what a reader sees here is exactly what their vote will move.
  */
 import { computed } from 'vue'
 import { atlas, tierOrder } from '@/lib/atlas'
-import { numericStats, tierStats } from '@/lib/community'
+import { bandTier, numericStats, tierStats, totalOf } from '@/lib/community'
 import { familiarityFill, familiarityInk, tierAbbrev, tierStyle } from '@/lib/scales'
 import type { RatingSummary } from '@/types/atlas'
 
@@ -31,9 +31,16 @@ const maturity = computed(() => {
   const counts = props.stats?.maturity ?? {}
   const rows = tierOrder.map((tier) => ({ tier, n: counts[tier] ?? 0 }))
   const most = Math.max(1, ...rows.map((r) => r.n))
+  const tierCounts = Object.fromEntries(rows.map((r) => [r.tier, r.n]))
   return {
     rows: rows.map((r) => ({ ...r, width: (r.n / most) * 100 })),
-    stats: tierStats(Object.fromEntries(rows.map((r) => [r.tier, r.n]))),
+    stats: {
+      n: totalOf(tierCounts),
+      best: bandTier(tierCounts, 'best'),
+      typical: bandTier(tierCounts, 'typical'),
+      worst: bandTier(tierCounts, 'worst'),
+      bimodal: tierStats(tierCounts).bimodal,
+    },
   }
 })
 
@@ -52,12 +59,6 @@ const familiarity = computed(() => {
 })
 
 const total = computed(() => props.stats?.count ?? 0)
-
-function modeText(modes: Array<string | number>): string {
-  if (modes.length === 0) return 'n/a'
-  if (modes.length > 2) return 'no clear mode'
-  return modes.join(' and ')
-}
 </script>
 
 <template>
@@ -94,8 +95,9 @@ function modeText(modes: Array<string | number>): string {
           </li>
         </ul>
         <p class="dist__stats">
-          Median <strong>{{ maturity.stats.median ?? 'n/a' }}</strong> · most common
-          <strong>{{ modeText(maturity.stats.modes) }}</strong>
+          Best case <strong>{{ maturity.stats.best ?? 'n/a' }}</strong> · Average
+          <strong>{{ maturity.stats.typical ?? 'n/a' }}</strong> · Worst case
+          <strong>{{ maturity.stats.worst ?? 'n/a' }}</strong>
           <template v-if="maturity.stats.bimodal">
             · <em>two peaks, the responses disagree rather than spread</em>
           </template>
@@ -119,9 +121,8 @@ function modeText(modes: Array<string | number>): string {
           </li>
         </ul>
         <p class="dist__stats">
-          Mean <strong class="tabular">{{ familiarity.stats.mean }}</strong> · median
-          <strong class="tabular">{{ familiarity.stats.median }}</strong> · most common
-          <strong class="tabular">{{ modeText(familiarity.stats.modes) }}</strong>
+          Mean <strong class="tabular">{{ familiarity.stats.mean }}</strong> · Median
+          <strong class="tabular">{{ familiarity.stats.median }}</strong>
           <template v-if="familiarity.stats.bimodal"> · two peaks</template>
         </p>
       </div>

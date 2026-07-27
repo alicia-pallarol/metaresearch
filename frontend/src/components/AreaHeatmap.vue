@@ -225,6 +225,9 @@ function cellStyle(problemId: string, areaName: string) {
  */
 function cellLabel(problemId: string, areaName: string): string {
   const cell = cellOf(problemId, areaName)
+  // The community view must not fall back to our research count: a cell
+  // nobody has voted on yet stays blank rather than showing our number.
+  if (source.value === 'community' && cell.tier === null) return ''
   return cell.agendaCount > 0 ? String(cell.agendaCount) : ''
 }
 
@@ -250,13 +253,11 @@ const SCENARIO_OPTIONS = [
   { value: 'worst' as const, label: 'Worst case' },
 ]
 
-const caption = computed(() => {
-  const whose =
-    source.value === 'research'
-      ? 'what we read and concluded'
-      : 'how researchers who answered rated the maturity of these areas'
-  return `Colour is ${whose}, taken as ${SCENARIO_HINTS[scenario.value]}.`
-})
+const captionWhose = computed(() =>
+  source.value === 'research'
+    ? 'what we read and concluded'
+    : 'how researchers who answered rated the maturity of these areas',
+)
 
 /** Said plainly rather than hidden: an empty community view is not a broken one. */
 const communityNotice = computed(() => {
@@ -279,8 +280,9 @@ function tipChipStyle(tier: Tier | null) {
       <div class="heatmap__intro">
         <h2 id="area-heatmap-title" class="heatmap__title">Research areas against problems</h2>
         <p class="heatmap__sub">
-          {{ caption }} The <strong>number</strong> is how many agendas in that area reach the problem
-          at all. Hover a cell to name them, strongest first; click to open them.
+          <strong>Colour</strong> is {{ captionWhose }}, taken as {{ SCENARIO_HINTS[scenario] }}. The
+          <strong>number</strong> is how many agendas in that area reach the problem at all. Hover a
+          cell to name them, strongest first; click to open them.
         </p>
       </div>
 

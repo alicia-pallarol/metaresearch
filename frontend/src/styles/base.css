@@ -72,23 +72,15 @@
     --border: rgba(255, 255, 255, 0.12);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
 
-    --tier-robust: #9ec5f4;
-    --tier-strong: #5598e7;
-    --tier-early: #2a78d6;
-    --tier-untested: #184f95;
-    --tier-never: #d55181;
-    --tier-contested: #dda032;
+    /* Maturity ramp intentionally NOT redefined here: robust stays the
+       darkest blue in both themes, so evidence strength always reads the
+       same way. See tier-robust etc. and ink-on-* in :root. */
 
     --fam-0: #a9dcb3;
     --fam-1: #5cbb74;
     --fam-2: #2f9450;
     --fam-3: #146336;
     --fam-4: #0c4426;
-
-    --ink-on-strong: #0b0b0b;
-    --ink-on-mid: #ffffff;
-    --ink-on-light: #ffffff;
-    --ink-on-contested: #0b0b0b;
 
     --focus: #5598e7;
     --link: #9ec5f4;
@@ -109,22 +101,14 @@
   --border: rgba(255, 255, 255, 0.12);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
 
-  --tier-robust: #9ec5f4;
-  --tier-strong: #5598e7;
-  --tier-early: #2a78d6;
-  --tier-untested: #184f95;
-  --tier-never: #d55181;
-  --tier-contested: #dda032;
+  /* Maturity ramp intentionally NOT redefined here: robust stays the
+     darkest blue in both themes, so evidence strength always reads the
+     same way. See tier-robust etc. and ink-on-* in :root. */
 
   --fam-0: #a9dcb3;
   --fam-1: #5cbb74;
   --fam-2: #2f9450;
   --fam-3: #146336;
-
-  --ink-on-strong: #0b0b0b;
-  --ink-on-mid: #ffffff;
-  --ink-on-light: #ffffff;
-  --ink-on-contested: #0b0b0b;
 
   --focus: #5598e7;
   --link: #9ec5f4;
