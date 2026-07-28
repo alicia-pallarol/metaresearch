@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { RouterLink } from 'vue-router'
 import { atlas, getAreaByName, getAreaByTag, tierCounts, tierRank } from '@/lib/atlas'
 import { gridCell, type GridSource, type Scenario } from '@/lib/community'
 import { useSummary } from '@/composables/useSummary'
@@ -57,6 +56,36 @@ async function focusProblem(problemId: string): Promise<void> {
   gridSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
 }
 
+/** The hero title is a shortcut to the grid: same smooth scroll as a cell click. */
+function scrollToGrid(): void {
+  gridSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+}
+
+// A small decorative square beside the hero: a grid of cells in the four maturity
+// blues, echoing the real grid below. Cells slowly fade in, shift colour and fade
+// out; hovering one holds it lit and recoloured. Purely ornamental, hidden from
+// assistive tech. The fill is passed as a custom property so the hover rule in
+// CSS can override the colour (an inline background could not be).
+const artColumns = 6
+const artRows = 6
+const artCycle = 18 // seconds; see cellCycle below
+
+// Deterministic 0..1 hash, so the layout is scattered (not diagonal) but stable
+// across renders rather than reshuffling on every paint.
+const hash = (n: number): number => {
+  const x = Math.sin(n) * 43758.5453
+  return x - Math.floor(x)
+}
+
+const blues = ['var(--tier-untested)', 'var(--tier-early)', 'var(--tier-strong)', 'var(--tier-robust)']
+const artCells = Array.from({ length: artColumns * artRows }, (_, i) => ({
+  // Random colour per cell, so the blues are scattered rather than striped.
+  fill: blues[Math.floor(hash(i + 1) * blues.length)],
+  // Random negative offset desyncs the cells: at any moment some are fading in
+  // while others fade out, with no diagonal wave running through them.
+  delay: `-${(hash((i + 1) * 1.7) * artCycle).toFixed(2)}s`,
+}))
+
 /** "Show Interpretability in the grid": jump to its strongest cell against any problem. */
 async function focusArea(areaTag: string): Promise<void> {
   const areaName = getAreaByTag(areaTag)?.name
@@ -80,43 +109,63 @@ async function focusArea(areaTag: string): Promise<void> {
   <div>
     <section class="hero">
       <div class="wrap">
-        <h1 class="hero__title">The Map</h1>
-        <p class="hero__lead">
-          {{ atlas.agendas.length }} research agendas across {{ atlas.areas.length }} areas, rated
-          against {{ atlas.problems.length }} open problems in AI safety. Every rating answers one
-          question: <em>how mature is the evidence that this line of work addresses this specific
-          problem?</em> The ratings are read and written by hand, one source at a time; no model
-          generated any of this.
-        </p>
-        <p class="hero__invite">
-          It is a draft put out for correction. Open any cell, then any agenda, to see the reasoning;
-          then add your own rating, agree or not, or point us to work we missed, right there.
-        </p>
+        <h1 class="hero__title">
+          <a class="hero__title-link" href="#grid" @click.prevent="scrollToGrid">The Map</a>
+        </h1>
 
-        <dl class="hero__stats">
-          <div class="stat">
-            <dt>Rated cells</dt>
-            <dd class="tabular">{{ ratedCells }}</dd>
+        <div class="hero__inner">
+          <div class="hero__body">
+            <p class="hero__para">
+              A crowdsourced view of where AI safety research stands.<br />
+              Anyone can weigh in, and we want you to!
+            </p>
+            <p class="hero__para">
+              The <a class="hero__maplink" href="#grid" @click.prevent="scrollToGrid">Map</a> covers
+              {{ atlas.agendas.length }} research agendas across {{ atlas.areas.length }} areas,
+              rated against {{ atlas.problems.length }} open problems. Each rating answers one
+              question: how mature is the evidence that this line of work addresses this problem?
+            </p>
+            <p class="hero__para">
+              Open any cell to see the reasoning behind a rating and what others have submitted, then
+              add your own. Every response feeds back into the map.
+            </p>
+
+            <dl class="hero__stats">
+              <div class="stat">
+                <dt>Rated cells</dt>
+                <dd class="tabular">{{ ratedCells }}</dd>
+              </div>
+              <div class="stat">
+                <dt>Cells rated Robust</dt>
+                <dd class="tabular">{{ robustCells }}</dd>
+              </div>
+              <div class="stat stat--live">
+                <dt>Researcher responses</dt>
+                <dd v-if="state === 'ready' || totalSubmissions > 0" class="tabular">
+                  {{ totalSubmissions }}
+                  <span v-if="uniqueSubmitters > 0" class="stat__sub">from {{ uniqueSubmitters }} people</span>
+                </dd>
+                <dd v-else-if="state === 'loading'" class="stat__pending">checking…</dd>
+                <dd v-else class="stat__pending">not available right now</dd>
+              </div>
+            </dl>
           </div>
-          <div class="stat">
-            <dt>Cells rated Robust</dt>
-            <dd class="tabular">{{ robustCells }}</dd>
+
+          <div class="hero__art" aria-hidden="true">
+            <div class="cellgrid" :style="{ '--cols': artColumns, '--rows': artRows }">
+              <span
+                v-for="(cell, i) in artCells"
+                :key="i"
+                class="cellgrid__cell"
+                :style="{ '--fill': cell.fill, animationDelay: cell.delay }"
+              />
+            </div>
           </div>
-          <div class="stat stat--live">
-            <dt>Researcher responses</dt>
-            <dd v-if="state === 'ready' || totalSubmissions > 0" class="tabular">
-              {{ totalSubmissions }}
-              <span v-if="uniqueSubmitters > 0" class="stat__sub">from {{ uniqueSubmitters }} people</span>
-            </dd>
-            <dd v-else-if="state === 'loading'" class="stat__pending">checking…</dd>
-            <dd v-else class="stat__pending">not available right now</dd>
-          </div>
-        </dl>
+        </div>
 
         <p class="hero__cta">
-          <a class="btn" href="#priorities">Start with where effort pays off</a>
+          <a class="btn" href="#priorities">Where to focus</a>
           <a class="btn btn--quiet" href="#agendas">Browse every agenda →</a>
-          <RouterLink class="btn btn--quiet" to="/methodology">How to read the ratings →</RouterLink>
         </p>
       </div>
     </section>
@@ -179,29 +228,149 @@ async function focusArea(areaTag: string): Promise<void> {
   padding-block: clamp(2.5rem, 1.5rem + 4vw, 5rem) clamp(2rem, 1rem + 3vw, 3.5rem);
 }
 
+/* The paragraphs + counters sit on the left; the decorative square on the right.
+   align-items: stretch makes the square exactly as tall as that text block, from
+   the first paragraph down to the bottom of the counters. It collapses to a
+   single column (art hidden) below the breakpoint so nothing crowds on phones. */
+.hero__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(2rem, 5vw, 4rem);
+}
+
+/* Sized to its content (the ~60ch paragraphs), never growing, so space-between
+   can park the square out at the right margin with the text staying on the left. */
+.hero__body {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
 .hero__title {
   max-width: 20ch;
 }
 
-.hero__lead {
+/* The title doubles as a jump link to the grid. Underlined so it reads as
+   clickable; it stays the same colour as the heading rather than link-blue. */
+.hero__title-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 5px;
+  text-decoration-color: var(--tier-early);
+  cursor: pointer;
+  transition: text-decoration-color 0.15s ease;
+}
+
+.hero__title-link:hover,
+.hero__title-link:focus-visible {
+  text-decoration-color: var(--tier-robust);
+}
+
+/* --- Decorative maturity-blue cell grid ------------------------------------ */
+.hero__art {
+  flex: 0 0 auto;
+  display: none; /* wide screens only, enabled in the media query below */
+}
+
+/* A square, sized by its WIDTH (bounded by the viewport) with the height derived
+   from aspect-ratio. Sizing width-first is what keeps the flex box exactly as
+   wide as the square, so it can never spill past the right edge. The width lands
+   close to the text block's height, so it still reads as "about as tall as the
+   text". Equal rows and columns keep the cells square too. */
+.cellgrid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 6), 1fr);
+  grid-template-rows: repeat(var(--rows, 6), 1fr);
+  gap: 7px;
+  width: clamp(240px, 28vw, 340px);
+  aspect-ratio: 1 / 1;
+}
+
+/* Each cell slowly fades in, shifts colour, and fades out again, on a long loop
+   (18s) with a desynced start, so cells appear and disappear independently. */
+.cellgrid__cell {
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: var(--fill);
+  opacity: 0.55;
+  animation: cellCycle 18s ease-in-out infinite;
+  transition:
+    background 0.35s ease,
+    opacity 0.35s ease;
+}
+
+@keyframes cellCycle {
+  0% {
+    opacity: 0;
+    background: var(--fill);
+  }
+  40% {
+    opacity: 0.82;
+    background: var(--fill);
+  }
+  70% {
+    opacity: 0.82;
+    background: var(--focus);
+  }
+  100% {
+    opacity: 0;
+    background: var(--focus);
+  }
+}
+
+/* Hovering drops the loop and holds the cell full and recoloured; the transition
+   makes it ease in and out rather than snap. */
+.cellgrid__cell:hover {
+  animation: none;
+  opacity: 1;
+  background: var(--focus);
+}
+
+/* Only show the square once the row is wide enough to hold the text and the
+   square side by side. Below this it hides. */
+@media (min-width: 1024px) {
+  .hero__art {
+    display: flex;
+  }
+}
+
+/* For readers who ask for less motion, hold the cells still (no twinkle) but keep
+   the hover recolour, which is a colour change rather than movement. */
+@media (prefers-reduced-motion: reduce) {
+  .cellgrid__cell {
+    animation: none;
+    opacity: 0.55;
+    transform: none;
+  }
+}
+
+.hero__para {
   font-size: 1.0625rem;
   color: var(--ink-secondary);
-  max-width: 62ch;
+  max-width: 60ch;
+  margin: 0 0 1rem;
 }
 
-.hero__invite {
-  font-size: 0.9375rem;
+/* The first paragraph carries the invitation, so give it a touch more presence. */
+.hero__para:first-of-type {
   color: var(--ink);
-  max-width: 62ch;
-  border-left: 3px solid var(--rule-strong);
-  padding-left: 0.85rem;
 }
 
+/* Inline "Map" link inside the paragraph, in the usual link colour. */
+.hero__maplink {
+  color: var(--link);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* No bottom margin: the counters are the last thing in the block, so the block
+   (and the square beside it) ends exactly where the counters end. */
 .hero__stats {
   display: flex;
   flex-wrap: wrap;
   gap: 2.25rem;
-  margin: 2rem 0 1.75rem;
+  margin: 1.6rem 0 0;
 }
 
 .stat dt {
@@ -232,11 +401,14 @@ async function focusArea(areaTag: string): Promise<void> {
   color: var(--ink-muted);
 }
 
+/* The CTA now spans full width below the text/art row, so it needs its own top
+   margin: without it the buttons crowd the counters directly above. */
 .hero__cta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
+  margin-top: 2.25rem;
 }
 
 .hero__cta .btn {

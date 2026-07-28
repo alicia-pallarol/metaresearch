@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
-import { atlas } from '@/lib/atlas'
 import { refreshSummary } from '@/composables/useSummary'
 
 type Theme = 'system' | 'light' | 'dark'
